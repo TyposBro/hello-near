@@ -1,4 +1,11 @@
 import { Card } from "../../components";
+<<<<<<< HEAD
+import { _container } from "./index.styled";
+export const Profile = () => {
+  return (
+    <_container>
+      <Card />
+=======
 
 import PostActivityCard from "../../components/post";
 import { _container } from "./index.styled";
@@ -26,6 +33,7 @@ export const Profile = () => {
       {thread.posts.map( (item, i) => 
         <PostActivityCard data={item} key={i}/>
       )}
+>>>>>>> 9679c58bffe91a7c76e224a0d952eb9040d3fe18
     </_container>
   );
 };
