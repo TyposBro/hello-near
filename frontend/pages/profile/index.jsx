@@ -1,4 +1,4 @@
-const Profile = () => {
+export const Profile = () => {
   return <div>Profile</div>;
 };
 
