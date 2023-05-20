@@ -1,2 +1,5 @@
-DEFINE_NEAR_METHOD(get_greeting)
-DEFINE_NEAR_METHOD(set_greeting)
+DEFINE_NEAR_METHOD(getEmployees)
+DEFINE_NEAR_METHOD(getExperienceList)
+DEFINE_NEAR_METHOD(getStatus)
+DEFINE_NEAR_METHOD(hireEmployee)
+DEFINE_NEAR_METHOD(kickEmployee)

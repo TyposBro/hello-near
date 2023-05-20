@@ -33,6 +33,41 @@ var TypeBrand;
   TypeBrand["BIGINT"] = "bigint";
   TypeBrand["DATE"] = "date";
 })(TypeBrand || (TypeBrand = {}));
+const ERR_INCONSISTENT_STATE = "The collection is an inconsistent state. Did previous smart contract execution terminate unexpectedly?";
+const ERR_INDEX_OUT_OF_BOUNDS = "Index out of bounds";
+/**
+ * Asserts that the expression passed to the function is truthy, otherwise throws a new Error with the provided message.
+ *
+ * @param expression - The expression to be asserted.
+ * @param message - The error message to be printed.
+ */
+function assert$1(expression, message) {
+  if (!expression) {
+    throw new Error("assertion failed: " + message);
+  }
+}
+function getValueWithOptions(value, options = {
+  deserializer: deserialize
+}) {
+  if (value === null) {
+    return options?.defaultValue ?? null;
+  }
+  const deserialized = deserialize(value);
+  if (deserialized === undefined || deserialized === null) {
+    return options?.defaultValue ?? null;
+  }
+  if (options?.reconstructor) {
+    return options.reconstructor(deserialized);
+  }
+  return deserialized;
+}
+function serializeValueWithOptions(value, {
+  serializer
+} = {
+  serializer: serialize
+}) {
+  return serializer(value);
+}
 function serialize(valueToSerialize) {
   return encode(JSON.stringify(valueToSerialize, function (key, value) {
     if (typeof value === "bigint") {
@@ -440,23 +475,6 @@ var PromiseError;
 const U64_MAX = 2n ** 64n - 1n;
 const EVICTED_REGISTER = U64_MAX - 1n;
 /**
- * Logs parameters in the NEAR WASM virtual machine.
- *
- * @param params - Parameters to log.
- */
-function log(...params) {
-  env.log(params.reduce((accumulated, parameter, index) => {
-    // Stringify undefined
-    const param = parameter === undefined ? "undefined" : parameter;
-    // Convert Objects to strings and convert to string
-    const stringified = typeof param === "object" ? JSON.stringify(param) : `${param}`;
-    if (index === 0) {
-      return stringified;
-    }
-    return `${accumulated} ${stringified}`;
-  }, ""));
-}
-/**
  * Returns the account ID of the account that called the function.
  * Can only be called in a call or initialize function.
  */
@@ -491,6 +509,28 @@ function storageReadRaw(key) {
   return env.read_register(0);
 }
 /**
+ * Checks for the existance of a value under the provided key in NEAR storage.
+ *
+ * @param key - The key to check for in storage.
+ */
+function storageHasKeyRaw(key) {
+  return env.storage_has_key(key) === 1n;
+}
+/**
+ * Checks for the existance of a value under the provided utf-8 string key in NEAR storage.
+ *
+ * @param key - The utf-8 string key to check for in storage.
+ */
+function storageHasKey(key) {
+  return storageHasKeyRaw(encode(key));
+}
+/**
+ * Get the last written or removed value from NEAR storage.
+ */
+function storageGetEvictedRaw() {
+  return env.read_register(EVICTED_REGISTER);
+}
+/**
  * Writes the provided bytes to NEAR storage under the provided key.
  *
  * @param key - The key under which to store the value.
@@ -498,6 +538,22 @@ function storageReadRaw(key) {
  */
 function storageWriteRaw(key, value) {
   return env.storage_write(key, value, EVICTED_REGISTER) === 1n;
+}
+/**
+ * Removes the value of the provided key from NEAR storage.
+ *
+ * @param key - The key to be removed.
+ */
+function storageRemoveRaw(key) {
+  return env.storage_remove(key, EVICTED_REGISTER) === 1n;
+}
+/**
+ * Removes the value of the provided utf-8 string key from NEAR storage.
+ *
+ * @param key - The utf-8 string key to be removed.
+ */
+function storageRemove(key) {
+  return storageRemoveRaw(encode(key));
 }
 /**
  * Returns the arguments passed to the current smart contract call.
@@ -511,6 +567,467 @@ function inputRaw() {
  */
 function input() {
   return decode(inputRaw());
+}
+
+/**
+ * A lookup map that stores data in NEAR storage.
+ */
+class LookupMap {
+  /**
+   * @param keyPrefix - The byte prefix to use when storing elements inside this collection.
+   */
+  constructor(keyPrefix) {
+    this.keyPrefix = keyPrefix;
+  }
+  /**
+   * Checks whether the collection contains the value.
+   *
+   * @param key - The value for which to check the presence.
+   */
+  containsKey(key) {
+    const storageKey = this.keyPrefix + key;
+    return storageHasKey(storageKey);
+  }
+  /**
+   * Get the data stored at the provided key.
+   *
+   * @param key - The key at which to look for the data.
+   * @param options - Options for retrieving the data.
+   */
+  get(key, options) {
+    const storageKey = this.keyPrefix + key;
+    const value = storageReadRaw(encode(storageKey));
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Removes and retrieves the element with the provided key.
+   *
+   * @param key - The key at which to remove data.
+   * @param options - Options for retrieving the data.
+   */
+  remove(key, options) {
+    const storageKey = this.keyPrefix + key;
+    if (!storageRemove(storageKey)) {
+      return options?.defaultValue ?? null;
+    }
+    const value = storageGetEvictedRaw();
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Store a new value at the provided key.
+   *
+   * @param key - The key at which to store in the collection.
+   * @param newValue - The value to store in the collection.
+   * @param options - Options for retrieving and storing the data.
+   */
+  set(key, newValue, options) {
+    const storageKey = this.keyPrefix + key;
+    const storageValue = serializeValueWithOptions(newValue, options);
+    if (!storageWriteRaw(encode(storageKey), storageValue)) {
+      return options?.defaultValue ?? null;
+    }
+    const value = storageGetEvictedRaw();
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Extends the current collection with the passed in array of key-value pairs.
+   *
+   * @param keyValuePairs - The key-value pairs to extend the collection with.
+   * @param options - Options for storing the data.
+   */
+  extend(keyValuePairs, options) {
+    for (const [key, value] of keyValuePairs) {
+      this.set(key, value, options);
+    }
+  }
+  /**
+   * Serialize the collection.
+   *
+   * @param options - Options for storing the data.
+   */
+  serialize(options) {
+    return serializeValueWithOptions(this, options);
+  }
+  /**
+   * Converts the deserialized data from storage to a JavaScript instance of the collection.
+   *
+   * @param data - The deserialized data to create an instance from.
+   */
+  static reconstruct(data) {
+    return new LookupMap(data.keyPrefix);
+  }
+}
+
+function indexToKey(prefix, index) {
+  const data = new Uint32Array([index]);
+  const array = new Uint8Array(data.buffer);
+  const key = str(array);
+  return prefix + key;
+}
+/**
+ * An iterable implementation of vector that stores its content on the trie.
+ * Uses the following map: index -> element
+ */
+class Vector {
+  /**
+   * @param prefix - The byte prefix to use when storing elements inside this collection.
+   * @param length - The initial length of the collection. By default 0.
+   */
+  constructor(prefix, length = 0) {
+    this.prefix = prefix;
+    this.length = length;
+  }
+  /**
+   * Checks whether the collection is empty.
+   */
+  isEmpty() {
+    return this.length === 0;
+  }
+  /**
+   * Get the data stored at the provided index.
+   *
+   * @param index - The index at which to look for the data.
+   * @param options - Options for retrieving the data.
+   */
+  get(index, options) {
+    if (index >= this.length) {
+      return options?.defaultValue ?? null;
+    }
+    const storageKey = indexToKey(this.prefix, index);
+    const value = storageReadRaw(bytes(storageKey));
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Removes an element from the vector and returns it in serialized form.
+   * The removed element is replaced by the last element of the vector.
+   * Does not preserve ordering, but is `O(1)`.
+   *
+   * @param index - The index at which to remove the element.
+   * @param options - Options for retrieving and storing the data.
+   */
+  swapRemove(index, options) {
+    assert$1(index < this.length, ERR_INDEX_OUT_OF_BOUNDS);
+    if (index + 1 === this.length) {
+      return this.pop(options);
+    }
+    const key = indexToKey(this.prefix, index);
+    const last = this.pop(options);
+    assert$1(storageWriteRaw(bytes(key), serializeValueWithOptions(last, options)), ERR_INCONSISTENT_STATE);
+    const value = storageGetEvictedRaw();
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Adds data to the collection.
+   *
+   * @param element - The data to store.
+   * @param options - Options for storing the data.
+   */
+  push(element, options) {
+    const key = indexToKey(this.prefix, this.length);
+    this.length += 1;
+    storageWriteRaw(bytes(key), serializeValueWithOptions(element, options));
+  }
+  /**
+   * Removes and retrieves the element with the highest index.
+   *
+   * @param options - Options for retrieving the data.
+   */
+  pop(options) {
+    if (this.isEmpty()) {
+      return options?.defaultValue ?? null;
+    }
+    const lastIndex = this.length - 1;
+    const lastKey = indexToKey(this.prefix, lastIndex);
+    this.length -= 1;
+    assert$1(storageRemoveRaw(bytes(lastKey)), ERR_INCONSISTENT_STATE);
+    const value = storageGetEvictedRaw();
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Replaces the data stored at the provided index with the provided data and returns the previously stored data.
+   *
+   * @param index - The index at which to replace the data.
+   * @param element - The data to replace with.
+   * @param options - Options for retrieving and storing the data.
+   */
+  replace(index, element, options) {
+    assert$1(index < this.length, ERR_INDEX_OUT_OF_BOUNDS);
+    const key = indexToKey(this.prefix, index);
+    assert$1(storageWriteRaw(bytes(key), serializeValueWithOptions(element, options)), ERR_INCONSISTENT_STATE);
+    const value = storageGetEvictedRaw();
+    return getValueWithOptions(value, options);
+  }
+  /**
+   * Extends the current collection with the passed in array of elements.
+   *
+   * @param elements - The elements to extend the collection with.
+   */
+  extend(elements) {
+    for (const element of elements) {
+      this.push(element);
+    }
+  }
+  [Symbol.iterator]() {
+    return new VectorIterator(this);
+  }
+  /**
+   * Create a iterator on top of the default collection iterator using custom options.
+   *
+   * @param options - Options for retrieving and storing the data.
+   */
+  createIteratorWithOptions(options) {
+    return {
+      [Symbol.iterator]: () => new VectorIterator(this, options)
+    };
+  }
+  /**
+   * Return a JavaScript array of the data stored within the collection.
+   *
+   * @param options - Options for retrieving and storing the data.
+   */
+  toArray(options) {
+    const array = [];
+    const iterator = options ? this.createIteratorWithOptions(options) : this;
+    for (const value of iterator) {
+      array.push(value);
+    }
+    return array;
+  }
+  /**
+   * Remove all of the elements stored within the collection.
+   */
+  clear() {
+    for (let index = 0; index < this.length; index++) {
+      const key = indexToKey(this.prefix, index);
+      storageRemoveRaw(bytes(key));
+    }
+    this.length = 0;
+  }
+  /**
+   * Serialize the collection.
+   *
+   * @param options - Options for storing the data.
+   */
+  serialize(options) {
+    return serializeValueWithOptions(this, options);
+  }
+  /**
+   * Converts the deserialized data from storage to a JavaScript instance of the collection.
+   *
+   * @param data - The deserialized data to create an instance from.
+   */
+  static reconstruct(data) {
+    const vector = new Vector(data.prefix, data.length);
+    return vector;
+  }
+}
+/**
+ * An iterator for the Vector collection.
+ */
+class VectorIterator {
+  /**
+   * @param vector - The vector collection to create an iterator for.
+   * @param options - Options for retrieving and storing data.
+   */
+  constructor(vector, options) {
+    this.vector = vector;
+    this.options = options;
+    this.current = 0;
+  }
+  next() {
+    if (this.current >= this.vector.length) {
+      return {
+        value: null,
+        done: true
+      };
+    }
+    const value = this.vector.get(this.current, this.options);
+    this.current += 1;
+    return {
+      value,
+      done: false
+    };
+  }
+}
+
+/**
+ * An unordered map that stores data in NEAR storage.
+ */
+class UnorderedMap {
+  /**
+   * @param prefix - The byte prefix to use when storing elements inside this collection.
+   */
+  constructor(prefix) {
+    this.prefix = prefix;
+    this.keys = new Vector(`${prefix}u`); // intentional different prefix with old UnorderedMap
+    this.values = new LookupMap(`${prefix}m`);
+  }
+  /**
+   * The number of elements stored in the collection.
+   */
+  get length() {
+    return this.keys.length;
+  }
+  /**
+   * Checks whether the collection is empty.
+   */
+  isEmpty() {
+    return this.keys.isEmpty();
+  }
+  /**
+   * Get the data stored at the provided key.
+   *
+   * @param key - The key at which to look for the data.
+   * @param options - Options for retrieving the data.
+   */
+  get(key, options) {
+    const valueAndIndex = this.values.get(key);
+    if (valueAndIndex === null) {
+      return options?.defaultValue ?? null;
+    }
+    const [value] = valueAndIndex;
+    return getValueWithOptions(encode(value), options);
+  }
+  /**
+   * Store a new value at the provided key.
+   *
+   * @param key - The key at which to store in the collection.
+   * @param value - The value to store in the collection.
+   * @param options - Options for retrieving and storing the data.
+   */
+  set(key, value, options) {
+    const valueAndIndex = this.values.get(key);
+    const serialized = serializeValueWithOptions(value, options);
+    if (valueAndIndex === null) {
+      const newElementIndex = this.length;
+      this.keys.push(key);
+      this.values.set(key, [decode(serialized), newElementIndex]);
+      return null;
+    }
+    const [oldValue, oldIndex] = valueAndIndex;
+    this.values.set(key, [decode(serialized), oldIndex]);
+    return getValueWithOptions(encode(oldValue), options);
+  }
+  /**
+   * Removes and retrieves the element with the provided key.
+   *
+   * @param key - The key at which to remove data.
+   * @param options - Options for retrieving the data.
+   */
+  remove(key, options) {
+    const oldValueAndIndex = this.values.remove(key);
+    if (oldValueAndIndex === null) {
+      return options?.defaultValue ?? null;
+    }
+    const [value, index] = oldValueAndIndex;
+    assert$1(this.keys.swapRemove(index) !== null, ERR_INCONSISTENT_STATE);
+    // the last key is swapped to key[index], the corresponding [value, index] need update
+    if (!this.keys.isEmpty() && index !== this.keys.length) {
+      // if there is still elements and it was not the last element
+      const swappedKey = this.keys.get(index);
+      const swappedValueAndIndex = this.values.get(swappedKey);
+      assert$1(swappedValueAndIndex !== null, ERR_INCONSISTENT_STATE);
+      this.values.set(swappedKey, [swappedValueAndIndex[0], index]);
+    }
+    return getValueWithOptions(encode(value), options);
+  }
+  /**
+   * Remove all of the elements stored within the collection.
+   */
+  clear() {
+    for (const key of this.keys) {
+      // Set instead of remove to avoid loading the value from storage.
+      this.values.set(key, null);
+    }
+    this.keys.clear();
+  }
+  [Symbol.iterator]() {
+    return new UnorderedMapIterator(this);
+  }
+  /**
+   * Create a iterator on top of the default collection iterator using custom options.
+   *
+   * @param options - Options for retrieving and storing the data.
+   */
+  createIteratorWithOptions(options) {
+    return {
+      [Symbol.iterator]: () => new UnorderedMapIterator(this, options)
+    };
+  }
+  /**
+   * Return a JavaScript array of the data stored within the collection.
+   *
+   * @param options - Options for retrieving and storing the data.
+   */
+  toArray(options) {
+    const array = [];
+    const iterator = options ? this.createIteratorWithOptions(options) : this;
+    for (const value of iterator) {
+      array.push(value);
+    }
+    return array;
+  }
+  /**
+   * Extends the current collection with the passed in array of key-value pairs.
+   *
+   * @param keyValuePairs - The key-value pairs to extend the collection with.
+   */
+  extend(keyValuePairs) {
+    for (const [key, value] of keyValuePairs) {
+      this.set(key, value);
+    }
+  }
+  /**
+   * Serialize the collection.
+   *
+   * @param options - Options for storing the data.
+   */
+  serialize(options) {
+    return serializeValueWithOptions(this, options);
+  }
+  /**
+   * Converts the deserialized data from storage to a JavaScript instance of the collection.
+   *
+   * @param data - The deserialized data to create an instance from.
+   */
+  static reconstruct(data) {
+    const map = new UnorderedMap(data.prefix);
+    // reconstruct keys Vector
+    map.keys = new Vector(`${data.prefix}u`);
+    map.keys.length = data.keys.length;
+    // reconstruct values LookupMap
+    map.values = new LookupMap(`${data.prefix}m`);
+    return map;
+  }
+}
+/**
+ * An iterator for the UnorderedMap collection.
+ */
+class UnorderedMapIterator {
+  /**
+   * @param unorderedMap - The unordered map collection to create an iterator for.
+   * @param options - Options for retrieving and storing data.
+   */
+  constructor(unorderedMap, options) {
+    this.options = options;
+    this.keys = new VectorIterator(unorderedMap.keys);
+    this.map = unorderedMap.values;
+  }
+  next() {
+    const key = this.keys.next();
+    if (key.done) {
+      return {
+        value: [key.value, null],
+        done: key.done
+      };
+    }
+    const valueAndIndex = this.map.get(key.value);
+    assert$1(valueAndIndex !== null, ERR_INCONSISTENT_STATE);
+    return {
+      done: key.done,
+      value: [key.value, getValueWithOptions(encode(valueAndIndex[0]), this.options)]
+    };
+  }
 }
 
 /**
@@ -588,48 +1105,155 @@ function NearBindgen({
   };
 }
 
-var _dec, _dec2, _dec3, _class, _class2;
-let HelloNear = (_dec = NearBindgen({}), _dec2 = view(), _dec3 = call({}), _dec(_class = (_class2 = class HelloNear {
-  message = "Hello";
-  // This method is read-only and can be called for free
-  get_greeting() {
-    return this.message;
-  }
-  // This method changes the state, for which it cost gas
-  set_greeting({
-    message
+class Status {
+  constructor({
+    active,
+    company_id,
+    startYear
   }) {
-    log(`Saving greeting ${message}`);
-    this.message = message;
+    this.active = active;
+    if (active) {
+      this.company_id = startYear;
+      this.startYear = startYear;
+    }
   }
-}, (_applyDecoratedDescriptor(_class2.prototype, "get_greeting", [_dec2], Object.getOwnPropertyDescriptor(_class2.prototype, "get_greeting"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "set_greeting", [_dec3], Object.getOwnPropertyDescriptor(_class2.prototype, "set_greeting"), _class2.prototype)), _class2)) || _class);
-function set_greeting() {
-  const _state = HelloNear._getState();
-  if (!_state && HelloNear._requireInit()) {
-    throw new Error("Contract must be initialized");
-  }
-  const _contract = HelloNear._create();
-  if (_state) {
-    HelloNear._reconstruct(_contract, _state);
-  }
-  const _args = HelloNear._getArgs();
-  const _result = _contract.set_greeting(_args);
-  HelloNear._saveToStorage(_contract);
-  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(HelloNear._serialize(_result, true));
-}
-function get_greeting() {
-  const _state = HelloNear._getState();
-  if (!_state && HelloNear._requireInit()) {
-    throw new Error("Contract must be initialized");
-  }
-  const _contract = HelloNear._create();
-  if (_state) {
-    HelloNear._reconstruct(_contract, _state);
-  }
-  const _args = HelloNear._getArgs();
-  const _result = _contract.get_greeting(_args);
-  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(HelloNear._serialize(_result, true));
 }
 
-export { get_greeting, set_greeting };
+function assert(statement, message) {
+  if (!statement) throw Error(`Assertion failed: ${message}`);
+}
+
+var _dec, _dec2, _dec3, _dec4, _dec5, _dec6, _class, _class2;
+let ExperienceContract = (_dec = NearBindgen({}), _dec2 = call({}), _dec3 = call({}), _dec4 = view(), _dec5 = view(), _dec6 = view(), _dec(_class = (_class2 = class ExperienceContract {
+  constructor() {
+    this.employee_map = new UnorderedMap('employee_map');
+    this.company_map = new UnorderedMap('company_map');
+  }
+  hireEmployee({
+    employee_id
+  }) {
+    //Automatically takes company_id
+    const company_id = predecessorAccountId();
+    const company = this.company_map[company_id];
+    const employee = this.employee_map[employee_id];
+    assert(company && employee, 'Non existent variables');
+    assert(!employee.status.active, 'Person already has an active job');
+    company.employees.set(employee_id, 1);
+    employee.status = new Status({
+      active: true,
+      company_id,
+      startYear: currentYear()
+    });
+  }
+  kickEmployee({
+    employee_id
+  }) {
+    //Automatically takes company_id
+    const company_id = predecessorAccountId();
+    const company = this.company_map[company_id];
+    const employee = this.employee_map[employee_id];
+    assert(company, 'Non existent company');
+    assert(employee, 'Non existent employee');
+    assert(employee.status.active && employee.status.company_id == company_id && company.employees.get(employee_id), 'Person was not hired to this company');
+    company.employees.set(employee_id, 0);
+    employee.experience.push(WorkPeriod({
+      startYear: employee.status.startYear,
+      endYear: currentYear(),
+      company_id
+    }));
+    employee.status = new Status({
+      active: false
+    });
+  }
+  getEmployees({}) {
+    //Automatically takes company_id
+    const company_id = predecessorAccountId();
+    const company = this.company_map[company_id];
+    assert(company, 'Non existent company');
+    return Array.from(company.employees);
+  }
+  getExperienceList({}) {
+    //Automatically takes employee_id
+    const employee_id = predecessorAccountId();
+    const employee = this.employee_map[employee_id];
+    assert(employee, 'Non existent company');
+    return employee.experience.toArray();
+  }
+  getStatus({}) {
+    //Automatically takes employee_id
+    const employee_id = predecessorAccountId();
+    const employee = this.employee_map[employee_id];
+    assert(employee, 'Non existent company');
+    return employee.experience.status;
+  }
+}, (_applyDecoratedDescriptor(_class2.prototype, "hireEmployee", [_dec2], Object.getOwnPropertyDescriptor(_class2.prototype, "hireEmployee"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "kickEmployee", [_dec3], Object.getOwnPropertyDescriptor(_class2.prototype, "kickEmployee"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getEmployees", [_dec4], Object.getOwnPropertyDescriptor(_class2.prototype, "getEmployees"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getExperienceList", [_dec5], Object.getOwnPropertyDescriptor(_class2.prototype, "getExperienceList"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getStatus", [_dec6], Object.getOwnPropertyDescriptor(_class2.prototype, "getStatus"), _class2.prototype)), _class2)) || _class);
+function getStatus() {
+  const _state = ExperienceContract._getState();
+  if (!_state && ExperienceContract._requireInit()) {
+    throw new Error("Contract must be initialized");
+  }
+  const _contract = ExperienceContract._create();
+  if (_state) {
+    ExperienceContract._reconstruct(_contract, _state);
+  }
+  const _args = ExperienceContract._getArgs();
+  const _result = _contract.getStatus(_args);
+  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(ExperienceContract._serialize(_result, true));
+}
+function getExperienceList() {
+  const _state = ExperienceContract._getState();
+  if (!_state && ExperienceContract._requireInit()) {
+    throw new Error("Contract must be initialized");
+  }
+  const _contract = ExperienceContract._create();
+  if (_state) {
+    ExperienceContract._reconstruct(_contract, _state);
+  }
+  const _args = ExperienceContract._getArgs();
+  const _result = _contract.getExperienceList(_args);
+  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(ExperienceContract._serialize(_result, true));
+}
+function getEmployees() {
+  const _state = ExperienceContract._getState();
+  if (!_state && ExperienceContract._requireInit()) {
+    throw new Error("Contract must be initialized");
+  }
+  const _contract = ExperienceContract._create();
+  if (_state) {
+    ExperienceContract._reconstruct(_contract, _state);
+  }
+  const _args = ExperienceContract._getArgs();
+  const _result = _contract.getEmployees(_args);
+  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(ExperienceContract._serialize(_result, true));
+}
+function kickEmployee() {
+  const _state = ExperienceContract._getState();
+  if (!_state && ExperienceContract._requireInit()) {
+    throw new Error("Contract must be initialized");
+  }
+  const _contract = ExperienceContract._create();
+  if (_state) {
+    ExperienceContract._reconstruct(_contract, _state);
+  }
+  const _args = ExperienceContract._getArgs();
+  const _result = _contract.kickEmployee(_args);
+  ExperienceContract._saveToStorage(_contract);
+  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(ExperienceContract._serialize(_result, true));
+}
+function hireEmployee() {
+  const _state = ExperienceContract._getState();
+  if (!_state && ExperienceContract._requireInit()) {
+    throw new Error("Contract must be initialized");
+  }
+  const _contract = ExperienceContract._create();
+  if (_state) {
+    ExperienceContract._reconstruct(_contract, _state);
+  }
+  const _args = ExperienceContract._getArgs();
+  const _result = _contract.hireEmployee(_args);
+  ExperienceContract._saveToStorage(_contract);
+  if (_result !== undefined) if (_result && _result.constructor && _result.constructor.name === "NearPromise") _result.onReturn();else env.value_return(ExperienceContract._serialize(_result, true));
+}
+
+export { getEmployees, getExperienceList, getStatus, hireEmployee, kickEmployee };
 //# sourceMappingURL=hello_near.js.map
