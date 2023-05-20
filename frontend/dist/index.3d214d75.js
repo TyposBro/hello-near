@@ -39401,8 +39401,8 @@ function signTransaction(...args) {
 exports.signTransaction = signTransaction;
 
 },{"4ae65dd7936fee27":"fCgem","77a5855e7563a167":"ahVaM","6cc5148f6a1796fe":"kjmPo","8620b49f1f997dd2":"4JCmN","4dd96207aa1cabac":"kBQFP"}],"ahVaM":[function(require,module,exports) {
-var global = arguments[3];
 var process = require("a7d8857d6ea01967");
+var global = arguments[3];
 /**
  * [js-sha256]{@link https://github.com/emn178/js-sha256}
  *
