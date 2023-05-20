@@ -1105,6 +1105,36 @@ function NearBindgen({
   };
 }
 
+class Company {
+  constructor({
+    company_id
+  }) {
+    this.company_id = company_id;
+    this.employees = new UnorderedMap('active_employees_map');
+  }
+}
+class Employee {
+  constructor({
+    employee_id
+  }) {
+    this.employee_id = employee_id;
+    this.experience = new Vector() < WorkPeriod$1 > 'experience_list';
+    this.status = new Status({
+      active: false
+    });
+  }
+}
+class WorkPeriod$1 {
+  constructor({
+    startYear,
+    endYear,
+    company_id
+  }) {
+    this.startYear = startYear;
+    this.endYear = endYear;
+    this.company_id = company_id;
+  }
+}
 class Status {
   constructor({
     active,
@@ -1134,9 +1164,10 @@ let ExperienceContract = (_dec = NearBindgen({}), _dec2 = call({}), _dec3 = call
   }) {
     //Automatically takes company_id
     const company_id = predecessorAccountId();
+    if (!this.company_map[company_id]) this.company_map.set(company_id, new Company(company_id));
+    if (!this.employee_map[employee_id]) this.employee_map.set(employee_id, new Employee(employee_id));
     const company = this.company_map[company_id];
     const employee = this.employee_map[employee_id];
-    assert(company && employee, 'Non existent variables');
     assert(!employee.status.active, 'Person already has an active job');
     company.employees.set(employee_id, 1);
     employee.status = new Status({
@@ -1150,10 +1181,10 @@ let ExperienceContract = (_dec = NearBindgen({}), _dec2 = call({}), _dec3 = call
   }) {
     //Automatically takes company_id
     const company_id = predecessorAccountId();
+    if (!this.company_map[company_id]) this.company_map.set(company_id, new Company(company_id));
+    if (!this.employee_map[employee_id]) this.employee_map.set(employee_id, new Employee(employee_id));
     const company = this.company_map[company_id];
     const employee = this.employee_map[employee_id];
-    assert(company, 'Non existent company');
-    assert(employee, 'Non existent employee');
     assert(employee.status.active && employee.status.company_id == company_id && company.employees.get(employee_id), 'Person was not hired to this company');
     company.employees.set(employee_id, 0);
     employee.experience.push(WorkPeriod({
@@ -1168,13 +1199,14 @@ let ExperienceContract = (_dec = NearBindgen({}), _dec2 = call({}), _dec3 = call
   getEmployees({}) {
     //Automatically takes company_id
     const company_id = predecessorAccountId();
+    if (!this.company_map[company_id]) this.company_map.set(company_id, new Company(company_id));
     const company = this.company_map[company_id];
-    assert(company, 'Non existent company');
     return Array.from(company.employees);
   }
   getExperienceList({}) {
     //Automatically takes employee_id
     const employee_id = predecessorAccountId();
+    if (!this.employee_map[employee_id]) this.employee_map.set(employee_id, new Employee(employee_id));
     const employee = this.employee_map[employee_id];
     assert(employee, 'Non existent company');
     return employee.experience.toArray();
@@ -1182,8 +1214,8 @@ let ExperienceContract = (_dec = NearBindgen({}), _dec2 = call({}), _dec3 = call
   getStatus({}) {
     //Automatically takes employee_id
     const employee_id = predecessorAccountId();
+    if (!this.employee_map[employee_id]) this.employee_map.set(employee_id, new Employee(employee_id));
     const employee = this.employee_map[employee_id];
-    assert(employee, 'Non existent company');
     return employee.experience.status;
   }
 }, (_applyDecoratedDescriptor(_class2.prototype, "hireEmployee", [_dec2], Object.getOwnPropertyDescriptor(_class2.prototype, "hireEmployee"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "kickEmployee", [_dec3], Object.getOwnPropertyDescriptor(_class2.prototype, "kickEmployee"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getEmployees", [_dec4], Object.getOwnPropertyDescriptor(_class2.prototype, "getEmployees"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getExperienceList", [_dec5], Object.getOwnPropertyDescriptor(_class2.prototype, "getExperienceList"), _class2.prototype), _applyDecoratedDescriptor(_class2.prototype, "getStatus", [_dec6], Object.getOwnPropertyDescriptor(_class2.prototype, "getStatus"), _class2.prototype)), _class2)) || _class);
