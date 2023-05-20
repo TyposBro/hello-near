@@ -1,23 +1,25 @@
+import * as React from "react";
+import * as ReactDOM from "react-dom";
 import { createBrowserRouter } from "react-router-dom";
 import { Company, Profile, Hello } from "./pages";
 
 export const router = createBrowserRouter([
   {
     path: "/p",
-    Component: Profile,
+    element: <Profile />,
   },
   {
     path: "/c",
-    Component: Company,
+    element: <Company />,
   },
   {
     path: "/hello",
-    Component: Hello,
+    element: <Hello />,
   },
 
   {
     path: "/",
-    Component: Profile,
+    element: <Profile />,
   },
 ]);
 

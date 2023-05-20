@@ -1,3 +1,3 @@
-export { Company } from "./company";
-export { Profile } from "./profile";
-export { Hello } from "./hello";
+export { default as Company } from "./company";
+export { default as Profile } from "./profile";
+export { default as Hello } from "./hello";
