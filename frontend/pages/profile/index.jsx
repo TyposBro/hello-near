@@ -13,10 +13,18 @@ export const Profile = () => {
 
   return (
     <_container>
-      {/* <Card /> */}
+<Card
+        src="https://img.icons8.com/?size=512&id=30840&format=png"
+        title="Current company"
+        position="SWE"
+        company="Apple"
+        time="48m"
+      />
+      <Card title="Total experience" position="SWE" company="" time="5y" />
       {thread.posts.map( (item, i) => 
         <PostActivityCard data={item} key={i}/>
       )}
+      
       
     </_container>
   );
