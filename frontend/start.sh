@@ -5,7 +5,8 @@ DEV_ACCOUNT_FILE="${CONTRACT_DIRECTORY}/neardev/dev-account.env"
 
 start () {
   echo The app is starting!
-  env-cmd -f $DEV_ACCOUNT_FILE parcel index.html --open
+  env-cmd -f $DEV_ACCOUNT_FILE parcel index.html && parcel watch index.html
+  # parcel index.html && parcel watch index.html
 }
 
 alert () {
