@@ -38,6 +38,7 @@ class ExperienceContract{
 	@view({})
 	getEmployees({}){
 		//Automatically takes company_id
+		// 
 		const company_id = near.predecessorAccountId();
 		const company = this.company_map[company_id]
 		assert(company, 'Non existent company');
