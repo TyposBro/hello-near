@@ -1,14 +1,41 @@
 import exp from "constants";
 import styled from "styled-components";
+import {Star} from '@styled-icons/material';
+
 
 export const PostCard= styled.div`
-  background-color: white;
-  padding: 20px 20px;
-`;
-export const _row = styled.div``;
-export const _col = styled.div``;
+  display: flex;
+  justify-content: space-between;
+  margin: 5px;
 
-export const _title = styled.h2``;
-export const _subtitle = styled.div``;
-export const _span = styled.span``;
-export const _avatar = styled.img``;
+  background-color: white;
+  padding: 10px 10px;
+  border-radius: 8px;
+`;
+export const Avatar = styled.div`
+  flex: 0.5;
+  justify-content: center;
+`;
+export const Job = styled.div`
+  flex: 1;
+  justify-content: center;
+`;
+
+export const Company = styled.div`
+  flex: 1;
+  justify-content: center;
+`;
+export const Months = styled.div`
+  flex: 1;
+  justify-content: center;
+`;
+export const Rating = styled.div`
+  flex: 1;
+  justify-content: center;
+`;
+
+export const StarIcon = styled(Star)`
+  width: 20px;
+  height: 20px;
+  color: yellow;
+`;
