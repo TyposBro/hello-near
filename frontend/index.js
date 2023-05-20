@@ -14,7 +14,6 @@ window.onload = async () => {
   root.render(
     <React.StrictMode>
       <RouterProvider router={router} />
-      {/* // <App isSignedIn={isSignedIn} contractId={CONTRACT_ADDRESS} wallet={wallet} /> */}
     </React.StrictMode>
   );
 };
