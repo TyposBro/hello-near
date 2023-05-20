@@ -1,6 +1,7 @@
 import { _container, _row, _col, _avatar, _span, _subtitle, _title } from "./index.styled";
 
 const Card = () => {
+  // hello!
   return (
     <_container>
       <_row>
